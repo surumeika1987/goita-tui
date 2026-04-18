@@ -422,9 +422,9 @@ dependencies = [
 
 [[package]]
 name = "goita"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0ebb3206dcb0f2d3a241c292262673396a3e12febeda74f3afcf1e224e5af2a"
+checksum = "bb862f665eeb1b73a0933c15ceb1529c12eb30f846e6343e104f2deb329dcd2f"
 dependencies = [
  "goita_core",
  "rand 0.10.1",

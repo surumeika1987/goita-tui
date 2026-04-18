@@ -1,7 +1,7 @@
 use crate::app::{
     App, CurrentScreen, GameSetting, GameSettingSelection, PlayerSetting, TitleSelection,
 };
-use goita::BoardDirection;
+use goita::{BoardDirection, Piece, PieceWithFacing, Team};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -20,22 +20,24 @@ pub fn ui(frame: &mut Frame, app: &App) {
         ])
         .split(frame.area());
 
-    draw_header(frame, chunks[0]);
+    render_header(frame, chunks[0]);
+
+    render_game(frame, chunks[1], app);
 
     match app.current_screen {
-        CurrentScreen::Title(selection) => draw_title(frame, &selection),
-        CurrentScreen::GameSettings(selection) => draw_game_settings(frame, app, &selection),
+        CurrentScreen::Title(selection) => render_title(frame, &selection),
+        CurrentScreen::GameSettings(selection) => render_game_settings(frame, app, &selection),
         _ => {}
     }
 
-    draw_footer(frame, app, chunks[2]);
+    render_footer(frame, app, chunks[2]);
 }
 
 fn active_style() -> Style {
     Style::default().fg(Color::Black).bg(Color::Green)
 }
 
-fn draw_header(frame: &mut Frame, chunk: Rect) {
+fn render_header(frame: &mut Frame, chunk: Rect) {
     let title_block = Block::default()
         .borders(Borders::ALL)
         .style(Style::default());
@@ -48,7 +50,7 @@ fn draw_header(frame: &mut Frame, chunk: Rect) {
     frame.render_widget(title_text, chunk);
 }
 
-fn draw_footer(frame: &mut Frame, app: &App, chunk: Rect) {
+fn render_footer(frame: &mut Frame, app: &App, chunk: Rect) {
     let footer_block = Block::default()
         .borders(Borders::ALL)
         .style(Style::default());
@@ -88,7 +90,7 @@ fn centered_rect(size_x: u16, size_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn draw_title(frame: &mut Frame, selection: &TitleSelection) {
+fn render_title(frame: &mut Frame, selection: &TitleSelection) {
     let popup_block = Block::default()
         .title("タイトル")
         .borders(Borders::NONE)
@@ -131,7 +133,7 @@ fn draw_title(frame: &mut Frame, selection: &TitleSelection) {
     frame.render_widget(exit_text, popup_chunks[3]);
 }
 
-fn draw_game_settings(frame: &mut Frame, app: &App, selection: &GameSettingSelection) {
+fn render_game_settings(frame: &mut Frame, app: &App, selection: &GameSettingSelection) {
     let popup_block = Block::default()
         .title("ゲーム設定")
         .borders(Borders::NONE)
@@ -237,4 +239,183 @@ fn inital_player_text_string(app: &App) -> String {
 // 勝利点テキストブロック用のヘルパー関数
 fn winning_score_text_string(app: &App) -> String {
     format!("勝利点: <{}>", app.game_setting.winning_score)
+}
+
+fn render_game(frame: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(4),
+            Constraint::Length(4),
+            Constraint::Length(4),
+        ])
+        .split(area);
+
+    render_team_scores(frame, chunks[0], app);
+
+    let ne_board_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[1]);
+    render_player_board(frame, ne_board_chunks[0], app, BoardDirection::North);
+    render_player_board(frame, ne_board_chunks[1], app, BoardDirection::East);
+
+    let sw_board_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[2]);
+    render_player_board(frame, sw_board_chunks[0], app, BoardDirection::South);
+    render_player_board(frame, sw_board_chunks[1], app, BoardDirection::West);
+
+    render_player_hand(frame, chunks[3], app);
+}
+
+fn render_team_scores(frame: &mut Frame, area: Rect, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(area);
+
+    let ns_team_block = Block::default()
+        .title("南北チーム")
+        .borders(Borders::ALL)
+        .style(Style::default().fg(Color::Red));
+    let ew_team_block = Block::default()
+        .title("東西チーム")
+        .borders(Borders::ALL)
+        .style(Style::default().fg(Color::Blue));
+
+    let ns_team_text = Paragraph::new(Line::from(format!(
+        "{}/{}点",
+        app.team_score(Team::NorthSouth).unwrap_or_default(),
+        app.winning_score().unwrap_or_default(),
+    )))
+    .block(ns_team_block);
+
+    let ew_team_text = Paragraph::new(Line::from(format!(
+        "{}/{}点",
+        app.team_score(Team::EastWest).unwrap_or_default(),
+        app.winning_score().unwrap_or_default(),
+    )))
+    .block(ew_team_block);
+
+    frame.render_widget(ns_team_text, chunks[0]);
+    frame.render_widget(ew_team_text, chunks[1]);
+}
+
+fn render_player_board(frame: &mut Frame, area: Rect, app: &App, player: BoardDirection) {
+    let mut board_block = Block::default()
+        .title(format!("{} - 受け/攻め", player_to_str(player)))
+        .borders(Borders::ALL)
+        .style(Style::default());
+    let mut board_area = board_block.inner(area);
+
+    if let Some(current_turn_player) = app.current_turn_player() {
+        if current_turn_player == player {
+            board_block = board_block.style(Style::default().fg(Color::Green));
+        }
+    }
+
+    frame.render_widget(board_block, area);
+
+    render_pieces(
+        frame,
+        board_area,
+        app.view_board[usize::from(player)]
+            .as_ref()
+            .unwrap_or(&Vec::new()),
+        None,
+    );
+}
+
+fn render_player_hand(frame: &mut Frame, area: Rect, app: &App) {
+    let hand_title_string = if let Some(current_turn_player) = app.current_turn_player() {
+        format!("{} - 持ち駒", player_to_str(current_turn_player))
+    } else {
+        String::from("持ち駒")
+    };
+    let mut hand_block = Block::default()
+        .title(hand_title_string)
+        .borders(Borders::ALL)
+        .style(Style::default());
+    let mut hand_area = hand_block.inner(area);
+
+    frame.render_widget(hand_block, area);
+
+    let hand_with_facing = app
+        .view_hand
+        .as_ref()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .map(|piece| PieceWithFacing::FaceUp(*piece))
+        .collect::<Vec<PieceWithFacing>>();
+
+    render_pieces(frame, hand_area, &hand_with_facing, None);
+}
+
+fn piece_to_string(piece: Piece) -> String {
+    match piece {
+        Piece::King => String::from("王"),
+        Piece::Rook => String::from("飛"),
+        Piece::Bishop => String::from("角"),
+        Piece::Gold => String::from("金"),
+        Piece::Silver => String::from("銀"),
+        Piece::Knight => String::from("馬"),
+        Piece::Lance => String::from("香"),
+        Piece::Pawn => String::from("し"),
+    }
+}
+
+fn render_pieces(
+    frame: &mut Frame,
+    area: Rect,
+    pieces: &Vec<PieceWithFacing>,
+    selection: Option<u8>,
+) {
+    let vertical_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(area);
+
+    for i in 0..2 {
+        let board_piece_strings = pieces
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| j % 2 == i)
+            .map(|(_, x)| match x {
+                PieceWithFacing::FaceUp(piece) => piece_to_string(*piece),
+                PieceWithFacing::FaceDown(_) => String::from("裏"),
+            })
+            .collect::<Vec<String>>();
+
+        let horizontal_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(3),
+            ])
+            .split(vertical_chunks[i]);
+
+        for j in 0..4 {
+            let board_piece_string = if let Some(piece_string) = board_piece_strings.get(j) {
+                piece_string.clone()
+            } else {
+                String::from("　")
+            };
+
+            let mut board_piece_style = Style::default();
+            if let Some(selection) = selection {
+                if selection == (i * 4 + j) as u8 {
+                    board_piece_style = active_style();
+                }
+            }
+
+            let board_piece_text =
+                Paragraph::new(Line::from(board_piece_string).style(board_piece_style));
+            frame.render_widget(board_piece_text, horizontal_chunks[j]);
+        }
+    }
 }
