@@ -107,7 +107,7 @@ fn game_settings_key_event_handler(
             GameSettingSelection::Player4 => {
                 change_player_settings_preve(app, BoardDirection::West)
             }
-            GameSettingSelection::InitialTurnPlayer => change_init_turn_player_next(app),
+            GameSettingSelection::InitialTurnPlayer => change_init_turn_player_preve(app),
             GameSettingSelection::WinningScore => change_winning_score_decrase(app),
             GameSettingSelection::Start => {}
         },
