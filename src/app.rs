@@ -316,11 +316,18 @@ impl App {
         }
     }
 
+    pub fn sync_screen(&mut self, player: BoardDirection) {
+        self.temp_place_piece = None;
+        self.sync_board();
+        self.sync_hand(player);
+    }
+
     pub fn clear_view_board(&mut self) {
         self.view_board = [None, None, None, None];
     }
 
     pub fn sync_board(&mut self) {
+        self.temp_place_piece = None;
         if let Some(game) = self.game_state.as_ref() {
             for i in 0..4 {
                 let player = BoardDirection::from(i as u8);
@@ -371,6 +378,7 @@ impl App {
         if let Some(player) = player {
             self.temp_place_piece = None;
             self.sync_hand(player);
+            self.sync_board();
         }
     }
 
@@ -381,6 +389,12 @@ impl App {
         {
             hand.remove(pos);
         }
+    }
+
+    pub fn set_temp_place_piece(&mut self, player: BoardDirection, piece: Piece) {
+        self.temp_place_piece = Some(piece);
+        self.push_view_board(player, PieceWithFacing::FaceUp(piece));
+        self.remove_from_view_hand(piece);
     }
 
     pub fn place_piece(&mut self, selection: u8) -> Option<ApplyResult> {
@@ -399,18 +413,17 @@ impl App {
                     },
                 );
                 if let Ok(result) = result {
-                    self.temp_place_piece = None;
-                    self.sync_board();
-                    self.sync_hand(current_turn_player.next());
+                    match result {
+                        ApplyResult::Continuing => self.sync_screen(current_turn_player.next()),
+                        ApplyResult::RoundOver(_) => self.sync_screen(current_turn_player),
+                    }
                     Some(result)
                 } else {
                     None
                 }
             } else {
                 let temp_piece = *selection_piece;
-                self.temp_place_piece = Some(temp_piece);
-                self.push_view_board(current_turn_player, PieceWithFacing::FaceUp(temp_piece));
-                self.remove_from_view_hand(temp_piece);
+                self.set_temp_place_piece(current_turn_player, temp_piece);
                 None
             }
         } else {
@@ -424,12 +437,19 @@ impl App {
         {
             let result = game.play_turn(current_turn_player, PlayerAction::Pass);
             if let Ok(result) = result {
-                self.sync_board();
-                self.sync_hand(current_turn_player.next());
+                self.sync_screen(current_turn_player.next());
                 Some(result)
             } else {
                 None
             }
+        } else {
+            None
+        }
+    }
+
+    pub fn game_result(&self) -> Option<GameResult> {
+        if let Some(game) = self.game_state.as_ref() {
+            game.check_game_over()
         } else {
             None
         }

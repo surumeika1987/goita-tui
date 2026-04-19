@@ -64,6 +64,9 @@ where
                 CurrentScreen::RoundOver(_) => {
                     round_over_key_event_handler(app, key.code);
                 }
+                CurrentScreen::GameOver(_) => {
+                    game_over_key_event_handler(app, key.code);
+                }
                 _ => {}
             }
         }
@@ -131,7 +134,7 @@ fn game_settings_key_event_handler(
         },
         KeyCode::Enter => match selection {
             GameSettingSelection::Start => {
-                start_new_round(app);
+                start_new_game(app);
             }
             _ => {}
         },
@@ -201,24 +204,17 @@ fn game_key_event_handler(app: &mut App, key_code: KeyCode, selection: GameSelec
                     GameSelection::Bottom(index) => index * 2 + 1,
                     GameSelection::Pass => unreachable!(),
                 };
-                // TODO: 結果をハンドリングする
-                if let Some(result) = app.place_piece(selection) {
-                    match result {
-                        ApplyResult::Continuing => {}
-                        ApplyResult::RoundOver(round_result) => {
-                            app.current_screen = CurrentScreen::RoundOver(round_result);
-                        }
-                    }
-                }
+                place_piece(app, selection);
             }
             GameSelection::Pass => {
-                // TODO: 結果をハンドリングする
-                app.pass_turn();
+                pass_turn(app);
             }
         },
+        KeyCode::Char(' ') => {
+            pass_turn(app);
+        }
         KeyCode::Backspace => {
             app.revert_view_hand();
-            app.sync_board();
         }
         // Debug
         KeyCode::Char('q') => app.current_screen = CurrentScreen::Title(TitleSelection::Start),
@@ -226,8 +222,27 @@ fn game_key_event_handler(app: &mut App, key_code: KeyCode, selection: GameSelec
     }
 }
 
-fn start_new_round(app: &mut App) {
+fn pass_turn(app: &mut App) {
+    app.pass_turn();
+}
+
+fn place_piece(app: &mut App, selection: u8) {
+    if let Some(result) = app.place_piece(selection) {
+        match result {
+            ApplyResult::Continuing => {}
+            ApplyResult::RoundOver(round_result) => {
+                app.current_screen = CurrentScreen::RoundOver(round_result);
+            }
+        }
+    }
+}
+
+fn start_new_game(app: &mut App) {
     app.start_new_game();
+    start_new_round(app);
+}
+
+fn start_new_round(app: &mut App) {
     let deal_event = app.start_new_round();
     // TODO: 配牌イベントをハンドリングする
     if let Some(current_turn_player) = app.current_turn_player() {
@@ -240,7 +255,20 @@ fn start_new_round(app: &mut App) {
 fn round_over_key_event_handler(app: &mut App, key_code: KeyCode) {
     match key_code {
         KeyCode::Enter => {
-            start_new_round(app);
+            if let Some(result) = app.game_result() {
+                app.current_screen = CurrentScreen::GameOver(result);
+            } else {
+                start_new_round(app);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn game_over_key_event_handler(app: &mut App, key_code: KeyCode) {
+    match key_code {
+        KeyCode::Enter => {
+            app.current_screen = CurrentScreen::Title(TitleSelection::Start);
         }
         _ => {}
     }

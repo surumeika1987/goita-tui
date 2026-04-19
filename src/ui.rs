@@ -2,7 +2,7 @@ use crate::app::{
     App, CurrentScreen, GameSelection, GameSetting, GameSettingSelection, PlayerSetting,
     TitleSelection, ViewHand,
 };
-use goita::{BoardDirection, Piece, PieceWithFacing, RoundResult, Team};
+use goita::{BoardDirection, GameResult, Piece, PieceWithFacing, RoundResult, Team};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -33,6 +33,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
         CurrentScreen::Title(selection) => render_title(frame, &selection),
         CurrentScreen::GameSettings(selection) => render_game_settings(frame, app, &selection),
         CurrentScreen::RoundOver(result) => render_round_over(frame, &result),
+        CurrentScreen::GameOver(result) => render_game_over(frame, &result),
         _ => {}
     }
 
@@ -484,8 +485,60 @@ fn render_round_over(frame: &mut Frame, result: &RoundResult) {
         .borders(Borders::NONE)
         .style(Style::default().bg(Color::DarkGray));
 
-    let area = centered_rect(30, 10, frame.area());
+    let area = centered_rect(30, 6, frame.area());
     frame.render_widget(popup_block, area);
+
+    let round_over_block = Block::default()
+        .borders(Borders::ALL)
+        .title("ラウンド終了 - 結果");
+    let round_over_area = round_over_block.inner(area);
+    frame.render_widget(round_over_block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(round_over_area);
+
+    let winning_team_str = match result.winning_team() {
+        Team::NorthSouth => "南北チーム",
+        Team::EastWest => "東西チーム",
+    };
+
+    let winning_team_block = Block::default().borders(Borders::NONE);
+    let winning_team_text = Paragraph::new(Line::from(format!("勝利チーム: {}", winning_team_str)))
+        .block(winning_team_block);
+    frame.render_widget(winning_team_text, chunks[0]);
+
+    let score_block = Block::default().borders(Borders::NONE);
+    let score_text =
+        Paragraph::new(Line::from(format!("得点: {}点", result.score()))).block(score_block);
+    frame.render_widget(score_text, chunks[1]);
+
+    let next_block = Block::default()
+        .borders(Borders::NONE)
+        .style(active_style());
+    let next_text = Paragraph::new(Line::from("次へ")).block(next_block);
+    frame.render_widget(next_text, chunks[3]);
+}
+
+fn render_game_over(frame: &mut Frame, result: &GameResult) {
+    let popup_block = Block::default()
+        .borders(Borders::NONE)
+        .style(Style::default().bg(Color::DarkGray));
+
+    let area = centered_rect(30, 7, frame.area());
+    frame.render_widget(popup_block, area);
+
+    let game_over_block = Block::default()
+        .borders(Borders::ALL)
+        .title("ゲーム終了 - 結果");
+    let game_over_area = game_over_block.inner(area);
+    frame.render_widget(game_over_block, area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -496,12 +549,7 @@ fn render_round_over(frame: &mut Frame, result: &RoundResult) {
             Constraint::Length(1),
             Constraint::Length(1),
         ])
-        .split(area);
-
-    let popup_title_block = Block::default().borders(Borders::NONE);
-    let popup_title_text =
-        Paragraph::new(Line::from("ラウンド終了 - 結果")).block(popup_title_block);
-    frame.render_widget(popup_title_text, chunks[0]);
+        .split(game_over_area);
 
     let winning_team_str = match result.winning_team() {
         Team::NorthSouth => "南北チーム",
@@ -511,16 +559,26 @@ fn render_round_over(frame: &mut Frame, result: &RoundResult) {
     let winning_team_block = Block::default().borders(Borders::NONE);
     let winning_team_text = Paragraph::new(Line::from(format!("勝利チーム: {}", winning_team_str)))
         .block(winning_team_block);
-    frame.render_widget(winning_team_text, chunks[1]);
+    frame.render_widget(winning_team_text, chunks[0]);
 
-    let score_block = Block::default().borders(Borders::NONE);
-    let score_text =
-        Paragraph::new(Line::from(format!("得点: {}", result.score()))).block(score_block);
-    frame.render_widget(score_text, chunks[2]);
+    let ns_score_block = Block::default().borders(Borders::NONE);
+    let ns_score_text = Paragraph::new(Line::from(format!(
+        "南北チーム得点: {}点",
+        result.north_south_score()
+    )));
+    frame.render_widget(ns_score_text.block(ns_score_block), chunks[1]);
 
-    let next_block = Block::default()
+    let ew_score_block = Block::default().borders(Borders::NONE);
+    let ew_score_text = Paragraph::new(Line::from(format!(
+        "東西チーム得点: {}点",
+        result.east_west_score()
+    )));
+    frame.render_widget(ew_score_text.block(ew_score_block), chunks[2]);
+
+    let return_to_title_block = Block::default()
         .borders(Borders::NONE)
         .style(active_style());
-    let next_text = Paragraph::new(Line::from("次へ")).block(next_block);
-    frame.render_widget(next_text, chunks[4]);
+    let return_to_title_text =
+        Paragraph::new(Line::from("タイトルへ戻る")).block(return_to_title_block);
+    frame.render_widget(return_to_title_text, chunks[4]);
 }
