@@ -1,4 +1,4 @@
-use goita::BoardDirection;
+use goita::{ApplyResult, BoardDirection};
 use ratatui::{
     Terminal,
     backend::{Backend, CrosstermBackend},
@@ -13,7 +13,7 @@ use std::{error::Error, io};
 mod app;
 mod ui;
 
-use crate::app::{App, CurrentScreen, GameSettingSelection, TitleSelection};
+use crate::app::{App, CurrentScreen, GameSelection, GameSettingSelection, TitleSelection};
 use crate::ui::ui;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -37,7 +37,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
-
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()>
 where
     io::Error: From<B::Error>,
@@ -58,6 +57,12 @@ where
                 }
                 CurrentScreen::GameSettings(selection) => {
                     game_settings_key_event_handler(app, key.code, selection)
+                }
+                CurrentScreen::Game(selection) => {
+                    game_key_event_handler(app, key.code, selection);
+                }
+                CurrentScreen::RoundOver(_) => {
+                    round_over_key_event_handler(app, key.code);
                 }
                 _ => {}
             }
@@ -126,7 +131,7 @@ fn game_settings_key_event_handler(
         },
         KeyCode::Enter => match selection {
             GameSettingSelection::Start => {
-                app.current_screen = CurrentScreen::Game;
+                start_new_round(app);
             }
             _ => {}
         },
@@ -180,5 +185,63 @@ fn change_winning_score_increase(app: &mut App) {
 fn change_winning_score_decrase(app: &mut App) {
     if app.game_setting.winning_score > 10 {
         app.game_setting.winning_score -= 10;
+    }
+}
+
+fn game_key_event_handler(app: &mut App, key_code: KeyCode, selection: GameSelection) {
+    match key_code {
+        KeyCode::Up => app.current_screen = CurrentScreen::Game(selection.vertical_previous()),
+        KeyCode::Down => app.current_screen = CurrentScreen::Game(selection.vertical_next()),
+        KeyCode::Left => app.current_screen = CurrentScreen::Game(selection.horizontal_previous()),
+        KeyCode::Right => app.current_screen = CurrentScreen::Game(selection.horizontal_next()),
+        KeyCode::Enter => match selection {
+            GameSelection::Top(_) | GameSelection::Bottom(_) => {
+                let selection = match selection {
+                    GameSelection::Top(index) => index * 2,
+                    GameSelection::Bottom(index) => index * 2 + 1,
+                    GameSelection::Pass => unreachable!(),
+                };
+                // TODO: 結果をハンドリングする
+                if let Some(result) = app.place_piece(selection) {
+                    match result {
+                        ApplyResult::Continuing => {}
+                        ApplyResult::RoundOver(round_result) => {
+                            app.current_screen = CurrentScreen::RoundOver(round_result);
+                        }
+                    }
+                }
+            }
+            GameSelection::Pass => {
+                // TODO: 結果をハンドリングする
+                app.pass_turn();
+            }
+        },
+        KeyCode::Backspace => {
+            app.revert_view_hand();
+            app.sync_board();
+        }
+        // Debug
+        KeyCode::Char('q') => app.current_screen = CurrentScreen::Title(TitleSelection::Start),
+        _ => {}
+    }
+}
+
+fn start_new_round(app: &mut App) {
+    app.start_new_game();
+    let deal_event = app.start_new_round();
+    // TODO: 配牌イベントをハンドリングする
+    if let Some(current_turn_player) = app.current_turn_player() {
+        app.sync_hand(current_turn_player);
+    }
+    app.sync_board();
+    app.current_screen = CurrentScreen::Game(GameSelection::Top(0));
+}
+
+fn round_over_key_event_handler(app: &mut App, key_code: KeyCode) {
+    match key_code {
+        KeyCode::Enter => {
+            start_new_round(app);
+        }
+        _ => {}
     }
 }

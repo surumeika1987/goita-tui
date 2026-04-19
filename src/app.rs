@@ -1,6 +1,6 @@
 use goita::{
-    ApplyResult, BoardDirection, DealEvent, GoitaGame, GoitaRule, Piece, PieceWithFacing,
-    PlayerAction, Team,
+    ApplyResult, BoardDirection, DealEvent, GameResult, GoitaGame, GoitaRule, HandRank, Piece,
+    PieceWithFacing, PlayerAction, RoundResult, Team,
 };
 use std::iter;
 
@@ -10,12 +10,12 @@ pub enum CurrentScreen {
     Setting,
     Rules,
     GameSettings(GameSettingSelection),
-    Game,
+    Game(GameSelection),
     ReturnToTitle,
     FivePawn,
-    HandRank,
-    RoundOver,
-    GameOver,
+    HandRank(HandRank),
+    RoundOver(RoundResult),
+    GameOver(GameResult),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -115,14 +115,60 @@ pub struct GameSetting {
     pub winning_score: u16,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum GameSelection {
+    Top(u8),
+    Bottom(u8),
+    Pass,
+}
+
+impl GameSelection {
+    pub fn horizontal_next(&self) -> Self {
+        match self {
+            GameSelection::Top(select) => GameSelection::Top((select + 1) % 4),
+            GameSelection::Bottom(select) => GameSelection::Bottom((select + 1) % 4),
+            GameSelection::Pass => GameSelection::Pass,
+        }
+    }
+
+    pub fn horizontal_previous(&self) -> Self {
+        match self {
+            GameSelection::Top(select) => GameSelection::Top((select + 3) % 4),
+            GameSelection::Bottom(select) => GameSelection::Bottom((select + 3) % 4),
+            GameSelection::Pass => GameSelection::Pass,
+        }
+    }
+
+    pub fn vertical_next(&self) -> Self {
+        match self {
+            GameSelection::Top(select) => GameSelection::Bottom(*select),
+            GameSelection::Bottom(select) => GameSelection::Pass,
+            GameSelection::Pass => GameSelection::Top(0),
+        }
+    }
+
+    pub fn vertical_previous(&self) -> Self {
+        match self {
+            GameSelection::Top(select) => GameSelection::Pass,
+            GameSelection::Bottom(select) => GameSelection::Top(*select),
+            GameSelection::Pass => GameSelection::Bottom(0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ViewHand {
+    pub player: BoardDirection,
+    pub hand: Option<Vec<Piece>>,
+}
+
 #[derive(Debug)]
 pub struct App {
     pub current_screen: CurrentScreen,
 
     pub view_board: [Option<Vec<PieceWithFacing>>; 4],
-    pub view_hand: Option<Vec<Piece>>,
+    pub view_hand: Option<ViewHand>,
     pub temp_place_piece: Option<Piece>,
-    pub piece_selection: u8,
 
     pub game_setting: GameSetting,
     pub game_state: Option<GoitaGame>,
@@ -135,7 +181,6 @@ impl App {
             view_board: [None, None, None, None],
             view_hand: None,
             temp_place_piece: None,
-            piece_selection: 0,
             game_setting: GameSetting {
                 player1: PlayerSetting::Player,
                 player2: PlayerSetting::CPU,
@@ -156,6 +201,9 @@ impl App {
     }
 
     pub fn start_new_round(&mut self) -> Option<DealEvent> {
+        self.clear_view_board();
+        self.clear_view_hand();
+        self.clear_temp_place_piece();
         if let Some(game) = self.game_state.as_mut() {
             let deal_event = game.start_new_round();
             if let Ok(deal_event) = deal_event {
@@ -276,38 +324,71 @@ impl App {
         if let Some(game) = self.game_state.as_ref() {
             for i in 0..4 {
                 let player = BoardDirection::from(i as u8);
-                self.view_board[i] = game.player_board(player);
+                let slot = self.view_board[i] = game.player_board(player);
             }
         } else {
             self.view_board = [None, None, None, None];
         }
     }
 
+    pub fn push_view_board(&mut self, player: BoardDirection, piece: PieceWithFacing) {
+        let slot = &mut self.view_board[usize::from(player)];
+        slot.get_or_insert_with(Vec::new).push(piece);
+    }
+
     pub fn clear_view_hand(&mut self) {
         self.view_hand = None;
     }
 
+    pub fn clear_temp_place_piece(&mut self) {
+        if let Some(game) = self.game_state.as_ref()
+            && let Some(current_turn_player) = game.current_turn_player()
+            && let Some(_) = self.temp_place_piece
+        {
+            self.sync_hand(current_turn_player);
+            self.temp_place_piece = None;
+        }
+    }
+
     pub fn sync_hand(&mut self, player: BoardDirection) {
         if let Some(game) = self.game_state.as_ref() {
-            self.view_hand = game.player_hand(player);
+            self.view_hand = Some(ViewHand {
+                player: player,
+                hand: game.player_hand(player),
+            });
         } else {
             self.view_hand = None;
         }
     }
 
-    pub fn remove_from_view_hand(&mut self, piece: Piece) {
-        if let Some(view_hand) = self.view_hand.as_mut() {
-            if let Some(pos) = view_hand.iter().position(|p| *p == piece) {
-                view_hand.remove(pos);
-            }
+    pub fn revert_view_hand(&mut self) {
+        let player = if let Some(view_hand) = self.view_hand.as_ref() {
+            Some(view_hand.player)
+        } else {
+            None
+        };
+
+        if let Some(player) = player {
+            self.temp_place_piece = None;
+            self.sync_hand(player);
         }
     }
 
-    pub fn place_piece(&mut self) -> Option<ApplyResult> {
+    pub fn remove_from_view_hand(&mut self, piece: Piece) {
+        if let Some(view_hand) = self.view_hand.as_mut()
+            && let Some(hand) = view_hand.hand.as_mut()
+            && let Some(pos) = hand.iter().position(|p| *p == piece)
+        {
+            hand.remove(pos);
+        }
+    }
+
+    pub fn place_piece(&mut self, selection: u8) -> Option<ApplyResult> {
         if let Some(game) = self.game_state.as_mut()
             && let Some(current_turn_player) = game.current_turn_player()
             && let Some(view_hand) = self.view_hand.as_ref()
-            && let Some(selection_piece) = view_hand.get(self.piece_selection as usize)
+            && let Some(hand) = view_hand.hand.as_ref()
+            && let Some(selection_piece) = hand.get(selection as usize)
         {
             if let Some(temp_place_piece) = self.temp_place_piece {
                 let result = game.play_turn(
@@ -326,8 +407,27 @@ impl App {
                     None
                 }
             } else {
-                self.temp_place_piece = Some(*selection_piece);
-                self.remove_from_view_hand(*selection_piece);
+                let temp_piece = *selection_piece;
+                self.temp_place_piece = Some(temp_piece);
+                self.push_view_board(current_turn_player, PieceWithFacing::FaceUp(temp_piece));
+                self.remove_from_view_hand(temp_piece);
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn pass_turn(&mut self) -> Option<ApplyResult> {
+        if let Some(game) = self.game_state.as_mut()
+            && let Some(current_turn_player) = game.current_turn_player()
+        {
+            let result = game.play_turn(current_turn_player, PlayerAction::Pass);
+            if let Ok(result) = result {
+                self.sync_board();
+                self.sync_hand(current_turn_player.next());
+                Some(result)
+            } else {
                 None
             }
         } else {

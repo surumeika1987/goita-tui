@@ -1,7 +1,8 @@
 use crate::app::{
-    App, CurrentScreen, GameSetting, GameSettingSelection, PlayerSetting, TitleSelection,
+    App, CurrentScreen, GameSelection, GameSetting, GameSettingSelection, PlayerSetting,
+    TitleSelection, ViewHand,
 };
-use goita::{BoardDirection, Piece, PieceWithFacing, Team};
+use goita::{BoardDirection, Piece, PieceWithFacing, RoundResult, Team};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -22,11 +23,16 @@ pub fn ui(frame: &mut Frame, app: &App) {
 
     render_header(frame, chunks[0]);
 
-    render_game(frame, chunks[1], app);
+    if let CurrentScreen::Game(selection) = app.current_screen {
+        render_game(frame, chunks[1], app, Some(&selection));
+    } else {
+        render_game(frame, chunks[1], app, None);
+    }
 
     match app.current_screen {
         CurrentScreen::Title(selection) => render_title(frame, &selection),
         CurrentScreen::GameSettings(selection) => render_game_settings(frame, app, &selection),
+        CurrentScreen::RoundOver(result) => render_round_over(frame, &result),
         _ => {}
     }
 
@@ -241,14 +247,14 @@ fn winning_score_text_string(app: &App) -> String {
     format!("勝利点: <{}>", app.game_setting.winning_score)
 }
 
-fn render_game(frame: &mut Frame, area: Rect, app: &App) {
+fn render_game(frame: &mut Frame, area: Rect, app: &App, selection: Option<&GameSelection>) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Length(4),
             Constraint::Length(4),
-            Constraint::Length(4),
+            Constraint::Length(5),
         ])
         .split(area);
 
@@ -268,7 +274,25 @@ fn render_game(frame: &mut Frame, area: Rect, app: &App) {
     render_player_board(frame, sw_board_chunks[0], app, BoardDirection::South);
     render_player_board(frame, sw_board_chunks[1], app, BoardDirection::West);
 
-    render_player_hand(frame, chunks[3], app);
+    let piece_selection = if let Some(selection) = selection {
+        match selection {
+            GameSelection::Top(select) => Some(select * 2),
+            GameSelection::Bottom(select) => Some(select * 2 + 1),
+            GameSelection::Pass => None,
+        }
+    } else {
+        None
+    };
+
+    let pass_active = if let Some(selection) = selection
+        && let GameSelection::Pass = *selection
+    {
+        true
+    } else {
+        false
+    };
+
+    render_player_hand(frame, chunks[3], app, piece_selection, pass_active);
 }
 
 fn render_team_scores(frame: &mut Frame, area: Rect, app: &App) {
@@ -329,11 +353,19 @@ fn render_player_board(frame: &mut Frame, area: Rect, app: &App, player: BoardDi
     );
 }
 
-fn render_player_hand(frame: &mut Frame, area: Rect, app: &App) {
-    let hand_title_string = if let Some(current_turn_player) = app.current_turn_player() {
-        format!("{} - 持ち駒", player_to_str(current_turn_player))
-    } else {
-        String::from("持ち駒")
+fn render_player_hand(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    selection: Option<u8>,
+    pass_active: bool,
+) {
+    let hand_title_string = {
+        if let Some(view_hand) = app.view_hand.as_ref() {
+            format!("{} - 持ち駒", player_to_str(view_hand.player))
+        } else {
+            String::from("持ち駒")
+        }
     };
     let mut hand_block = Block::default()
         .title(hand_title_string)
@@ -343,15 +375,26 @@ fn render_player_hand(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(hand_block, area);
 
-    let hand_with_facing = app
-        .view_hand
-        .as_ref()
-        .unwrap_or(&Vec::new())
-        .iter()
-        .map(|piece| PieceWithFacing::FaceUp(*piece))
-        .collect::<Vec<PieceWithFacing>>();
+    let hand_chunk = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Length(1)])
+        .split(hand_area);
 
-    render_pieces(frame, hand_area, &hand_with_facing, None);
+    let hand_with_facing = if let Some(view_hand) = app.view_hand.as_ref() {
+        view_hand
+            .hand
+            .as_ref()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|piece| PieceWithFacing::FaceUp(*piece))
+            .collect::<Vec<PieceWithFacing>>()
+    } else {
+        Vec::new()
+    };
+
+    render_pieces(frame, hand_chunk[0], &hand_with_facing, selection);
+
+    render_pass(frame, hand_chunk[1], pass_active);
 }
 
 fn piece_to_string(piece: Piece) -> String {
@@ -408,7 +451,7 @@ fn render_pieces(
 
             let mut board_piece_style = Style::default();
             if let Some(selection) = selection {
-                if selection == (i * 4 + j) as u8 {
+                if selection == (j * 2 + i) as u8 {
                     board_piece_style = active_style();
                 }
             }
@@ -418,4 +461,66 @@ fn render_pieces(
             frame.render_widget(board_piece_text, horizontal_chunks[j]);
         }
     }
+}
+
+fn render_pass(frame: &mut Frame, area: Rect, active: bool) {
+    let mut chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(4), Constraint::Min(1)])
+        .split(area);
+
+    let mut pass_block = Block::default().borders(Borders::NONE);
+
+    if active {
+        pass_block = pass_block.style(active_style());
+    }
+
+    let pass_text = Paragraph::new(Line::from("パス")).block(pass_block);
+    frame.render_widget(pass_text, chunks[0]);
+}
+
+fn render_round_over(frame: &mut Frame, result: &RoundResult) {
+    let popup_block = Block::default()
+        .borders(Borders::NONE)
+        .style(Style::default().bg(Color::DarkGray));
+
+    let area = centered_rect(30, 10, frame.area());
+    frame.render_widget(popup_block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+    let popup_title_block = Block::default().borders(Borders::NONE);
+    let popup_title_text =
+        Paragraph::new(Line::from("ラウンド終了 - 結果")).block(popup_title_block);
+    frame.render_widget(popup_title_text, chunks[0]);
+
+    let winning_team_str = match result.winning_team() {
+        Team::NorthSouth => "南北チーム",
+        Team::EastWest => "東西チーム",
+    };
+
+    let winning_team_block = Block::default().borders(Borders::NONE);
+    let winning_team_text = Paragraph::new(Line::from(format!("勝利チーム: {}", winning_team_str)))
+        .block(winning_team_block);
+    frame.render_widget(winning_team_text, chunks[1]);
+
+    let score_block = Block::default().borders(Borders::NONE);
+    let score_text =
+        Paragraph::new(Line::from(format!("得点: {}", result.score()))).block(score_block);
+    frame.render_widget(score_text, chunks[2]);
+
+    let next_block = Block::default()
+        .borders(Borders::NONE)
+        .style(active_style());
+    let next_text = Paragraph::new(Line::from("次へ")).block(next_block);
+    frame.render_widget(next_text, chunks[4]);
 }
