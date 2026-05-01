@@ -13,7 +13,9 @@ use std::{error::Error, io};
 mod app;
 mod ui;
 
-use crate::app::{App, CurrentScreen, GameSelection, GameSettingSelection, TitleSelection};
+use crate::app::{
+    App, CurrentScreen, GameSelection, GameSettingSelection, ReturnToTitleSelection, TitleSelection,
+};
 use crate::ui::ui;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -66,6 +68,9 @@ where
                 }
                 CurrentScreen::GameOver(_) => {
                     game_over_key_event_handler(app, key.code);
+                }
+                CurrentScreen::ReturnToTitle(selection) => {
+                    return_to_title_key_event_handler(app, key.code, selection);
                 }
                 _ => {}
             }
@@ -216,8 +221,9 @@ fn game_key_event_handler(app: &mut App, key_code: KeyCode, selection: GameSelec
         KeyCode::Backspace => {
             app.revert_view_hand();
         }
-        // Debug
-        KeyCode::Char('q') => app.current_screen = CurrentScreen::Title(TitleSelection::Start),
+        KeyCode::Esc => {
+            app.current_screen = CurrentScreen::ReturnToTitle(ReturnToTitleSelection::No);
+        }
         _ => {}
     }
 }
@@ -270,6 +276,26 @@ fn game_over_key_event_handler(app: &mut App, key_code: KeyCode) {
         KeyCode::Enter => {
             app.current_screen = CurrentScreen::Title(TitleSelection::Start);
         }
+        _ => {}
+    }
+}
+
+fn return_to_title_key_event_handler(
+    app: &mut App,
+    key_code: KeyCode,
+    selection: ReturnToTitleSelection,
+) {
+    match key_code {
+        KeyCode::Left => app.current_screen = CurrentScreen::ReturnToTitle(selection.previous()),
+        KeyCode::Right => app.current_screen = CurrentScreen::ReturnToTitle(selection.next()),
+        KeyCode::Enter => match selection {
+            ReturnToTitleSelection::Yes => {
+                app.current_screen = CurrentScreen::Title(TitleSelection::Start)
+            }
+            ReturnToTitleSelection::No => {
+                app.current_screen = CurrentScreen::Game(GameSelection::Top(0))
+            }
+        },
         _ => {}
     }
 }

@@ -1,6 +1,6 @@
 use crate::app::{
     App, CurrentScreen, GameSelection, GameSetting, GameSettingSelection, PlayerSetting,
-    TitleSelection, ViewHand,
+    ReturnToTitleSelection, TitleSelection, ViewHand,
 };
 use goita::{BoardDirection, GameResult, Piece, PieceWithFacing, RoundResult, Team};
 use ratatui::{
@@ -34,6 +34,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
         CurrentScreen::GameSettings(selection) => render_game_settings(frame, app, &selection),
         CurrentScreen::RoundOver(result) => render_round_over(frame, &result),
         CurrentScreen::GameOver(result) => render_game_over(frame, &result),
+        CurrentScreen::ReturnToTitle(selection) => render_return_to_title(frame, selection),
         _ => {}
     }
 
@@ -581,4 +582,63 @@ fn render_game_over(frame: &mut Frame, result: &GameResult) {
     let return_to_title_text =
         Paragraph::new(Line::from("タイトルへ戻る")).block(return_to_title_block);
     frame.render_widget(return_to_title_text, chunks[4]);
+}
+
+fn render_return_to_title(frame: &mut Frame, selection: ReturnToTitleSelection) {
+    let popup_block = Block::default()
+        .borders(Borders::NONE)
+        .style(Style::default().bg(Color::DarkGray));
+
+    let area = centered_rect(25, 5, frame.area());
+    frame.render_widget(popup_block, area);
+
+    let return_to_title_block = Block::default()
+        .borders(Borders::ALL)
+        .title("タイトルへ戻る - 確認");
+    let return_to_title_area = return_to_title_block.inner(area);
+    frame.render_widget(return_to_title_block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(return_to_title_area);
+
+    let return_to_title_text_block = Block::default().borders(Borders::NONE);
+    let return_to_title_text_text =
+        Paragraph::new(Line::from("タイトルへ戻りますか？")).block(return_to_title_text_block);
+    frame.render_widget(return_to_title_text_text, chunks[0]);
+
+    let yes_no_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Length(4),
+            Constraint::Length(2),
+            Constraint::Length(6),
+        ])
+        .split(chunks[2]);
+
+    let yes_block = Block::default().borders(Borders::NONE);
+    let yes_text = Paragraph::new(Line::from("はい")).block(yes_block).style(
+        if let ReturnToTitleSelection::Yes = selection {
+            active_style()
+        } else {
+            Style::default()
+        },
+    );
+    frame.render_widget(yes_text, yes_no_chunks[1]);
+
+    let no_block = Block::default().borders(Borders::NONE);
+    let no_text = Paragraph::new(Line::from("いいえ")).block(no_block).style(
+        if let ReturnToTitleSelection::No = selection {
+            active_style()
+        } else {
+            Style::default()
+        },
+    );
+    frame.render_widget(no_text, yes_no_chunks[3]);
 }

@@ -11,7 +11,7 @@ pub enum CurrentScreen {
     Rules,
     GameSettings(GameSettingSelection),
     Game(GameSelection),
-    ReturnToTitle,
+    ReturnToTitle(ReturnToTitleSelection),
     FivePawn,
     HandRank(HandRank),
     RoundOver(RoundResult),
@@ -79,6 +79,28 @@ impl GameSettingSelection {
             GameSettingSelection::InitialTurnPlayer => GameSettingSelection::Player4,
             GameSettingSelection::WinningScore => GameSettingSelection::InitialTurnPlayer,
             GameSettingSelection::Start => GameSettingSelection::WinningScore,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ReturnToTitleSelection {
+    Yes,
+    No,
+}
+
+impl ReturnToTitleSelection {
+    pub fn next(&self) -> Self {
+        match self {
+            ReturnToTitleSelection::Yes => ReturnToTitleSelection::No,
+            ReturnToTitleSelection::No => ReturnToTitleSelection::Yes,
+        }
+    }
+
+    pub fn previous(&self) -> Self {
+        match self {
+            ReturnToTitleSelection::Yes => ReturnToTitleSelection::No,
+            ReturnToTitleSelection::No => ReturnToTitleSelection::Yes,
         }
     }
 }
